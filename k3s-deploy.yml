@@ -1,0 +1,287 @@
+---
+# Comprehensive K3s Cluster Installation Playbook
+# This playbook installs and configures a K3s cluster with high availability support
+
+- name: Install and Configure K3s Cluster
+  hosts: k3s_cluster
+  become: true
+  vars:
+    k3s_version: "v1.33.2+k3s1"  # Latest stable version (Jan 2025) with Kubernetes v1.33.2
+    k3s_cluster_secret: "{{ k3s_token | default('MySecretK3sToken123!') }}"
+    k3s_datastore: "embedded"    # Options: embedded, mysql, postgres, etcd
+    cni_plugin: "calico"         # Options: flannel (default), calico, cilium
+    pod_network_cidr: "192.168.0.0/16"  # Calico default pod network
+    service_network_cidr: "10.43.0.0/16"  # K3s default service network
+    
+  tasks:
+    # System preparation
+    - name: Update system packages (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Update system packages (RedHat/CentOS/Fedora)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install required packages (Debian/Ubuntu)
+      apt:
+        name:
+          - curl
+          - wget
+          - apt-transport-https
+          - ca-certificates
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages (RedHat/CentOS/Fedora)
+      package:
+        name:
+          - curl
+          - wget
+          - ca-certificates
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Disable swap (K3s works better without swap)
+    - name: Disable swap
+      command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: Remove swap from fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '^.*swap.*$'
+        state: absent
+
+    # Configure firewall for K3s
+    - name: Configure firewall for K3s (UFW - Debian/Ubuntu)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "6443"  # K3s API server
+        - "10250" # Kubelet API
+        - "8472"  # Flannel VXLAN
+      when: ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    - name: Configure firewall for K3s (FirewallD - RedHat/CentOS/Fedora)
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      loop:
+        - "6443"  # K3s API server
+        - "10250" # Kubelet API
+        - "8472"  # Flannel VXLAN
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+
+# Install K3s on master nodes
+- name: Install K3s Master Nodes
+  hosts: k3s_masters
+  become: true
+  serial: 1  # Install masters one at a time
+  tasks:
+    - name: Check if K3s is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_installed
+
+    - name: Download K3s installation script
+      get_url:
+        url: https://get.k3s.io
+        dest: /tmp/k3s-install.sh
+        mode: '0755'
+      when: not k3s_installed.stat.exists
+
+    - name: Install K3s server (first master)
+      shell: |
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_TOKEN="{{ k3s_cluster_secret }}" \
+        K3S_KUBECONFIG_MODE="644" \
+        INSTALL_K3S_EXEC="--cluster-init --disable=traefik --disable=servicelb --write-kubeconfig-mode=644 --flannel-backend=none --disable-network-policy --cluster-cidr={{ pod_network_cidr }}" \
+        /tmp/k3s-install.sh
+      when: 
+        - not k3s_installed.stat.exists
+        - inventory_hostname == groups['k3s_masters'][0]
+        - cni_plugin == "calico"
+
+    - name: Install K3s server (first master) - Flannel
+      shell: |
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_TOKEN="{{ k3s_cluster_secret }}" \
+        K3S_KUBECONFIG_MODE="644" \
+        INSTALL_K3S_EXEC="--cluster-init --disable=traefik --disable=servicelb --write-kubeconfig-mode=644 --flannel-backend=vxlan" \
+        /tmp/k3s-install.sh
+      when: 
+        - not k3s_installed.stat.exists
+        - inventory_hostname == groups['k3s_masters'][0]
+        - cni_plugin == "flannel"
+
+    - name: Install K3s server (additional masters)
+      shell: |
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_TOKEN="{{ k3s_cluster_secret }}" \
+        K3S_KUBECONFIG_MODE="644" \
+        INSTALL_K3S_EXEC="--server https://{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4']['address'] }}:6443 --disable=traefik --disable=servicelb --write-kubeconfig-mode=644 --flannel-backend=none --disable-network-policy --cluster-cidr={{ pod_network_cidr }}" \
+        /tmp/k3s-install.sh
+      when: 
+        - not k3s_installed.stat.exists
+        - inventory_hostname != groups['k3s_masters'][0]
+        - groups['k3s_masters'] | length > 1
+        - cni_plugin == "calico"
+
+    - name: Install K3s server (additional masters) - Flannel
+      shell: |
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_TOKEN="{{ k3s_cluster_secret }}" \
+        K3S_KUBECONFIG_MODE="644" \
+        INSTALL_K3S_EXEC="--server https://{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4']['address'] }}:6443 --disable=traefik --disable=servicelb --write-kubeconfig-mode=644 --flannel-backend=vxlan" \
+        /tmp/k3s-install.sh
+      when: 
+        - not k3s_installed.stat.exists
+        - inventory_hostname != groups['k3s_masters'][0]
+        - groups['k3s_masters'] | length > 1
+        - cni_plugin == "flannel"
+
+    - name: Start and enable K3s service
+      systemd:
+        name: k3s
+        state: started
+        enabled: yes
+
+    - name: Wait for K3s to be ready
+      wait_for:
+        port: 6443
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 5
+        timeout: 300
+
+    - name: Install Calico CNI
+      shell: |
+        k3s kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/tigera-operator.yaml
+        sleep 10
+        k3s kubectl apply -f - <<EOF
+        apiVersion: operator.tigera.io/v1
+        kind: Installation
+        metadata:
+          name: default
+        spec:
+          calicoNetwork:
+            ipPools:
+            - blockSize: 26
+              cidr: {{ pod_network_cidr }}
+              encapsulation: VXLANCrossSubnet
+              natOutgoing: Enabled
+              nodeSelector: all()
+        EOF
+      when: 
+        - inventory_hostname == groups['k3s_masters'][0]
+        - cni_plugin == "calico"
+
+    - name: Wait for Calico to be ready
+      shell: k3s kubectl wait --for=condition=Ready pods -l k8s-app=calico-node -n calico-system --timeout=300s
+      when: 
+        - inventory_hostname == groups['k3s_masters'][0]
+        - cni_plugin == "calico"
+
+    - name: Get node token for workers
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: k3s_node_token
+      when: inventory_hostname == groups['k3s_masters'][0]
+
+    - name: Save node token to local file
+      copy:
+        content: "{{ k3s_node_token.stdout }}"
+        dest: /tmp/k3s-node-token
+      delegate_to: localhost
+      when: inventory_hostname == groups['k3s_masters'][0]
+
+# Install K3s on worker nodes
+- name: Install K3s Worker Nodes
+  hosts: k3s_workers
+  become: true
+  tasks:
+    - name: Check if K3s agent is already installed
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_agent_installed
+
+    - name: Read node token from local file
+      slurp:
+        src: /tmp/k3s-node-token
+      register: node_token_file
+      delegate_to: localhost
+      when: not k3s_agent_installed.stat.exists
+
+    - name: Download K3s installation script
+      get_url:
+        url: https://get.k3s.io
+        dest: /tmp/k3s-install.sh
+        mode: '0755'
+      when: not k3s_agent_installed.stat.exists
+
+    - name: Install K3s agent
+      shell: |
+        INSTALL_K3S_VERSION="{{ k3s_version }}" \
+        K3S_URL="https://{{ hostvars[groups['k3s_masters'][0]]['ansible_default_ipv4']['address'] }}:6443" \
+        K3S_TOKEN="{{ node_token_file.content | b64decode | trim }}" \
+        INSTALL_K3S_EXEC="--node-label role=worker" \
+        /tmp/k3s-install.sh
+      when: not k3s_agent_installed.stat.exists
+
+    - name: Start and enable K3s agent service
+      systemd:
+        name: k3s-agent
+        state: started
+        enabled: yes
+
+# Post-installation validation
+- name: Validate K3s Cluster
+  hosts: k3s_masters[0]
+  become: true
+  tasks:
+    - name: Wait for all nodes to be ready
+      shell: k3s kubectl get nodes --no-headers | grep -c Ready
+      register: nodes_ready
+      retries: 30
+      delay: 10
+      until: nodes_ready.stdout | int == groups['k3s_cluster'] | length
+
+    - name: Show cluster nodes
+      command: k3s kubectl get nodes -o wide
+      register: cluster_nodes
+
+    - name: Display cluster information
+      debug:
+        msg: "{{ cluster_nodes.stdout_lines }}"
+
+    - name: Show cluster info
+      command: k3s kubectl cluster-info
+      register: cluster_info
+
+    - name: Display cluster info
+      debug:
+        msg: "{{ cluster_info.stdout_lines }}"
+
+    - name: Create kubeconfig for external access
+      shell: |
+        cp /etc/rancher/k3s/k3s.yaml /tmp/k3s-kubeconfig
+        sed -i 's/127.0.0.1/{{ ansible_default_ipv4.address }}/g' /tmp/k3s-kubeconfig
+        chmod 644 /tmp/k3s-kubeconfig
+
+    - name: Fetch kubeconfig to local machine
+      fetch:
+        src: /tmp/k3s-kubeconfig
+        dest: ./k3s-kubeconfig
+        flat: yes
+
+    - name: Display kubeconfig location
+      debug:
+        msg: "K3s kubeconfig has been saved to ./k3s-kubeconfig - you can use this to access your cluster remotely"

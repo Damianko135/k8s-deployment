@@ -1,0 +1,277 @@
+# Comprehensive Ansible Playbook: Kubernetes Cluster with Calico & Latest kubectl
+
+- name: Install and Configure Kubernetes Cluster
+  hosts: all
+  become: true
+  vars:
+    kubernetes_version: "1.28"
+    pod_network_cidr: "192.168.0.0/16"  # Calico default, can be adjusted
+  pre_tasks:
+    - name: Ensure Ansible is running with elevated privileges
+      ansible.builtin.assert:
+        that:
+          - ansible_user_id == 'root'
+        fail_msg: "This playbook must be run with root privileges."
+      
+  
+  tasks:
+    # Update System Packages
+    - name: Update system packages (Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages (Debian)
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Update system packages (RedHat)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install required packages (RedHat)
+      yum:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    # Disable Swap
+    - name: Disable swap
+      command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+
+    - name: Remove swap from fstab
+      lineinfile:
+        path: /etc/fstab
+        regexp: '^.*swap.*$'
+        state: absent
+
+    # Kernel Modules
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Configure kernel modules to load at boot
+      copy:
+        content: |
+          overlay
+          br_netfilter
+        dest: /etc/modules-load.d/k8s.conf
+
+    - name: Set sysctl params for Kubernetes networking
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+
+    # Containerd Installation
+    - name: Install containerd (Debian)
+      apt:
+        name: containerd.io
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install containerd (RedHat)
+      yum:
+        name: containerd.io
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Generate containerd config
+      shell: containerd config default > /etc/containerd/config.toml
+
+    - name: Set containerd to use systemd cgroup driver
+      replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+
+    - name: Start & Enable containerd
+      systemd:
+        name: containerd
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    # Kubernetes Repository Setup
+    - name: Add Kubernetes repository (Debian)
+      apt_repository:
+        repo: "deb https://apt.kubernetes.io/ kubernetes-xenial main"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Kubernetes GPG Key (Debian)
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Kubernetes repository (RedHat)
+      yum_repository:
+        name: kubernetes
+        description: Kubernetes
+        baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+        gpgcheck: 1
+        repo_gpgcheck: 1
+        gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg
+        enabled: 1
+      when: ansible_os_family == "RedHat"
+
+    # Install kubeadm, kubelet
+    - name: Install Kubernetes components
+      package:
+        name:
+          - kubelet
+          - kubeadm
+        state: present
+      notify: restart kubelet
+
+    - name: Enable kubelet service
+      systemd:
+        name: kubelet
+        enabled: yes
+
+    # Latest kubectl Installation (Always Latest)
+    - name: Get latest stable Kubernetes version
+      shell: curl -L -s https://dl.k8s.io/release/stable.txt
+      register: latest_k8s_version
+      changed_when: false
+
+    - name: Download latest kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/{{ latest_k8s_version.stdout }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+
+# Initialize Kubernetes Control Plane (Masters)
+- name: Initialize Kubernetes Master Node
+  hosts: masters
+  become: true
+  tasks:
+    - name: Check if cluster is already initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: k8s_admin_conf
+
+    - name: Initialize Kubernetes Cluster
+      command: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --apiserver-advertise-address={{ ansible_default_ipv4.address }}
+      when: not k8s_admin_conf.stat.exists
+      register: kubeadm_init
+
+    - name: Set up kube config for root
+      command: "{{ item }}"
+      with_items:
+        - mkdir -p /root/.kube
+        - cp -i /etc/kubernetes/admin.conf /root/.kube/config
+        - chown root:root /root/.kube/config
+      when: not k8s_admin_conf.stat.exists
+
+    # Install Calico Network Plugin (Production-ready)
+    - name: Install Calico CNI
+      command: >
+        kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      when: not k8s_admin_conf.stat.exists
+
+    - name: Generate cluster join command
+      command: kubeadm token create --print-join-command
+      register: join_command
+      when: not k8s_admin_conf.stat.exists
+
+    - name: Save join command to file
+      copy:
+        content: "{{ join_command.stdout }}"
+        dest: /tmp/k8s-join-command.sh
+        mode: "0755"
+      when: not k8s_admin_conf.stat.exists
+
+    - name: Fetch join command to control node
+      fetch:
+        src: /tmp/k8s-join-command.sh
+        dest: /tmp/k8s-join-command.sh
+        flat: yes
+      when: not k8s_admin_conf.stat.exists
+
+# Join Worker Nodes
+- name: Join Kubernetes Worker Nodes
+  hosts: workers
+  become: true
+  tasks:
+    - name: Check if node already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Copy join command to worker
+      copy:
+        src: /tmp/k8s-join-command.sh
+        dest: /tmp/k8s-join-command.sh
+        mode: "0755"
+      when: not kubelet_conf.stat.exists
+
+    - name: Join node to cluster
+      command: bash /tmp/k8s-join-command.sh
+      when: not kubelet_conf.stat.exists
+
+    - name: Clean up join command script
+      file:
+        path: /tmp/k8s-join-command.sh
+        state: absent
+
+# Post-install Cluster Validation
+- name: Validate Kubernetes Cluster
+  hosts: masters
+  become: true
+  tasks:
+    - name: Wait for nodes to be Ready
+      shell: kubectl get nodes --no-headers | grep -v NotReady
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: nodes_ready
+      retries: 30
+      delay: 10
+      until: nodes_ready.rc == 0
+
+    - name: Show Cluster Nodes
+      command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: cluster_nodes
+
+    - name: Display Cluster Info
+      debug:
+        msg: "{{ cluster_nodes.stdout_lines }}"

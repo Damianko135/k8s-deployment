@@ -1,0 +1,42 @@
+# List of Ansible roles to install Kubernetes
+# This file is used to define the roles and their versions for the Kubernetes installation.
+
+- name: kubernetes
+  src: geerlingguy.kubernetes
+  version: 3.0.0
+- name: calico
+  src: geerlingguy.calico
+  version: 2.0.0
+- name: kubelet
+  src: geerlingguy.kubelet
+  version: 2.0.0
+- name: kubectl
+  src: geerlingguy.kubectl
+  version: 2.0.0
+- name: docker
+  src: geerlingguy.docker
+  version: 3.0.0
+- name: sysctl
+  src: geerlingguy.sysctl
+  version: 2.0.0
+- name: ntp
+  src: geerlingguy.ntp
+  version: 2.0.0
+- name: selinux
+  src: geerlingguy.selinux
+  version: 2.0.0
+- name: firewalld
+  src: geerlingguy.firewalld
+  version: 2.0.0
+- name: sysctl
+  src: geerlingguy.sysctl
+  version: 2.0.0
+- name: chrony
+  src: geerlingguy.chrony
+  version: 2.0.0
+- name: kubeconfig
+  src: geerlingguy.kubeconfig
+  version: 2.0.0
+- name: kubeadm
+  src: geerlingguy.kubeadm
+  version: 2.0.0
