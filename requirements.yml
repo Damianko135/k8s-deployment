@@ -1,42 +1,26 @@
-# List of Ansible roles to install Kubernetes
-# This file is used to define the roles and their versions for the Kubernetes installation.
+---
+# Ansible Collections and Roles for K3s/Kubernetes Deployment
 
-- name: kubernetes
-  src: geerlingguy.kubernetes
-  version: 3.0.0
-- name: calico
-  src: geerlingguy.calico
-  version: 2.0.0
-- name: kubelet
-  src: geerlingguy.kubelet
-  version: 2.0.0
-- name: kubectl
-  src: geerlingguy.kubectl
-  version: 2.0.0
-- name: docker
-  src: geerlingguy.docker
-  version: 3.0.0
-- name: sysctl
-  src: geerlingguy.sysctl
-  version: 2.0.0
-- name: ntp
-  src: geerlingguy.ntp
-  version: 2.0.0
-- name: selinux
-  src: geerlingguy.selinux
-  version: 2.0.0
-- name: firewalld
-  src: geerlingguy.firewalld
-  version: 2.0.0
-- name: sysctl
-  src: geerlingguy.sysctl
-  version: 2.0.0
-- name: chrony
-  src: geerlingguy.chrony
-  version: 2.0.0
-- name: kubeconfig
-  src: geerlingguy.kubeconfig
-  version: 2.0.0
-- name: kubeadm
-  src: geerlingguy.kubeadm
-  version: 2.0.0
+# Collections (install with: ansible-galaxy collection install -r requirements.yml)
+collections:
+  # Kubernetes core modules for cluster management
+  - name: kubernetes.core
+    version: ">=2.4.0"
+  
+  # Community general utilities
+  - name: community.general
+    version: ">=7.0.0"
+
+# Roles (if you want to use external roles instead of your custom playbooks)
+# Install with: ansible-galaxy role install -r requirements.yml
+# roles:
+#   # System configuration roles 
+#   - src: geerlingguy.firewall
+#     version: 2.4.3
+
+
+#   - name: geerlingguy.ntp
+#     version: 2.7.0
+
+# Note: K3s installation is handled by your custom playbook using the official install script
+# No need for kubernetes, docker, or calico roles since K3s bundles everything
