@@ -1,17 +1,26 @@
 # Minimal Requirements for Kubernetes Deployment with Ansible
 # Install with: pip install -r requirements.txt
 
-# Core Ansible - everything needed to run the K8s playbook
-ansible>=6.0.0,<9.0.0
+# Core Ansible - Latest stable version
+ansible>=9.0.0,<11.0.0
 
 # Essential for K8s networking and IP calculations
-netaddr>=0.8.0
+netaddr>=0.10.0
 
 # Required for Ansible conditional logic and data parsing
-jmespath>=1.0.0
+jmespath>=1.0.1
 
-# Basic YAML support (usually included with ansible)
-pyyaml>=5.1
+# Kubernetes Python client for k8s module support
+kubernetes>=28.1.0
 
-# Ansible specific libraries
-ansible-lint>=6.0.0
+# YAML support
+pyyaml>=6.0.1
+
+# Ansible linting and best practices
+ansible-lint>=6.22.0
+
+# Cryptography for vault operations
+cryptography>=41.0.0
+
+# For better performance with large inventories
+resolvelib>=1.0.1

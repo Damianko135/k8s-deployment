@@ -1,0 +1,5 @@
+# Example vault password file
+# Copy this to .vault_pass and add your actual vault password
+# DO NOT commit .vault_pass to version control
+
+your_vault_password_here

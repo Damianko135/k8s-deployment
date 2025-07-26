@@ -103,7 +103,7 @@ install_python_packages() {
         pip install -r requirements.txt
     else
         print_status "Installing Ansible and dependencies..."
-        pip install "ansible>=8.0.0" netaddr jmespath kubernetes
+        pip install "ansible>=9.0.0" netaddr jmespath kubernetes cryptography
     fi
 
     print_status "Verifying Ansible installation..."
@@ -160,7 +160,7 @@ main() {
             print_status "Setting up system-wide installation..."
             cmd="pip3 install --user"
             [ "$(id -u)" -eq 0 ] && cmd="pip install"
-            $cmd "ansible>=8.0.0" netaddr jmespath kubernetes
+            $cmd "ansible>=9.0.0" netaddr jmespath kubernetes cryptography
             hash -r  # Refresh shell's command lookup
             print_warning "Ensure ~/.local/bin is in your PATH if using --user installs."
             verify_installation

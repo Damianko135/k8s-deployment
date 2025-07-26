@@ -1,33 +1,46 @@
 ---
-# Comprehensive K3s Cluster Installation Playbook
+# K3s Cluster Installation Playbook
 # This playbook installs and configures a K3s cluster with high availability support
 
 - name: Install and Configure K3s Cluster
   hosts: k3s_cluster
   become: true
   vars:
-    k3s_version: "v1.33.2+k3s1"  # Latest stable version (Jan 2025) with Kubernetes v1.33.2
-    k3s_cluster_secret: "{{ k3s_token | default('MySecretK3sToken123!') }}"
+    # Use variables from inventory, with secure defaults
+    k3s_version: "{{ k3s_version | default('v1.29.1+k3s2') }}"
+    k3s_cluster_secret: "{{ k3s_token }}"
     k3s_datastore: "embedded"    # Options: embedded, mysql, postgres, etcd
     cni_plugin: "calico"         # Options: flannel (default), calico, cilium
-    pod_network_cidr: "192.168.0.0/16"  # Calico default pod network
-    service_network_cidr: "10.43.0.0/16"  # K3s default service network
+    pod_network_cidr: "{{ k3s_pod_network_cidr | default('10.42.0.0/16') }}"
+    service_network_cidr: "{{ k3s_service_network_cidr | default('10.43.0.0/16') }}"
+    cluster_domain: "{{ k3s_cluster_domain | default('cluster.local') }}"
     
+  pre_tasks:
+    - name: Validate k3s_token is set
+      ansible.builtin.assert:
+        that:
+          - k3s_cluster_secret is defined
+          - k3s_cluster_secret != "CHANGE_ME_USE_VAULT"
+          - k3s_cluster_secret | length > 8
+        fail_msg: "k3s_token must be set and properly secured. Use ansible-vault to encrypt it."
+
   tasks:
     # System preparation
     - name: Update system packages (Debian/Ubuntu)
-      apt:
-        update_cache: yes
+      ansible.builtin.apt:
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
 
     - name: Update system packages (RedHat/CentOS/Fedora)
-      yum:
-        update_cache: yes
+      ansible.builtin.yum:
+        update_cache: true
       when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
 
     - name: Install required packages (Debian/Ubuntu)
-      apt:
+      ansible.builtin.apt:
         name:
           - curl
           - wget
@@ -35,30 +48,35 @@
           - ca-certificates
         state: present
       when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
 
     - name: Install required packages (RedHat/CentOS/Fedora)
-      package:
+      ansible.builtin.package:
         name:
           - curl
           - wget
           - ca-certificates
         state: present
       when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
 
     # Disable swap (K3s works better without swap)
     - name: Disable swap
-      command: swapoff -a
+      ansible.builtin.command: swapoff -a
       when: ansible_swaptotal_mb > 0
+      changed_when: false
+      tags: ['system', 'swap']
 
     - name: Remove swap from fstab
-      lineinfile:
+      ansible.builtin.lineinfile:
         path: /etc/fstab
         regexp: '^.*swap.*$'
         state: absent
+      tags: ['system', 'swap']
 
     # Configure firewall for K3s
     - name: Configure firewall for K3s (UFW - Debian/Ubuntu)
-      ufw:
+      community.general.ufw:
         rule: allow
         port: "{{ item }}"
         proto: tcp
@@ -67,20 +85,22 @@
         - "10250" # Kubelet API
         - "8472"  # Flannel VXLAN
       when: ansible_os_family == "Debian"
-      ignore_errors: yes
+      ignore_errors: true
+      tags: ['firewall']
 
     - name: Configure firewall for K3s (FirewallD - RedHat/CentOS/Fedora)
-      firewalld:
+      ansible.posix.firewalld:
         port: "{{ item }}/tcp"
-        permanent: yes
+        permanent: true
         state: enabled
-        immediate: yes
+        immediate: true
       loop:
         - "6443"  # K3s API server
         - "10250" # Kubelet API
         - "8472"  # Flannel VXLAN
       when: ansible_os_family == "RedHat"
-      ignore_errors: yes
+      ignore_errors: true
+      tags: ['firewall']
 
 # Install K3s on master nodes
 - name: Install K3s Master Nodes

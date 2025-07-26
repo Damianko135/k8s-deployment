@@ -1,0 +1,23 @@
+---
+# Example of how to use ansible-vault for sensitive variables
+# 
+# To encrypt a string:
+# ansible-vault encrypt_string 'your-secret-token' --name 'vault_k3s_token'
+#
+# To create an encrypted file:
+# ansible-vault create vault_vars.yml
+#
+# Example encrypted variables (replace with your own):
+
+# Example encrypted k3s token (this is just an example, create your own)
+vault_k3s_token: !vault |
+          $ANSIBLE_VAULT;1.1;AES256
+          66386439653236336464626566653863336464373834643030656266396534323230383566333966
+          3562643163366464316662386435626436396665613135310a626438346336353331386135323734
+          62656266663835633564336464316662386435626436396665613135310a626438346336353331
+          3862643163366464316662386435626436396665613135310a626438346336353331386135323734
+
+# You can also encrypt entire files for more complex configurations
+# vault_database_config:
+#   host: "{{ vault_db_host }}"
+#   password: "{{ vault_db_password }}"

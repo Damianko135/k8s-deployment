@@ -1,29 +1,35 @@
-# Comprehensive Ansible Playbook: Kubernetes Cluster with Calico & Latest kubectl
+---
+# Kubernetes Cluster Installation Playbook with Calico CNI
 
 - name: Install and Configure Kubernetes Cluster
-  hosts: all
+  hosts: k8s_cluster
   become: true
   vars:
-    kubernetes_version: "1.28"
-    pod_network_cidr: "192.168.0.0/16"  # Calico default, can be adjusted
+    # Use variables from inventory with secure defaults
+    kubernetes_version: "{{ kubernetes_version | default('1.29') }}"
+    pod_network_cidr: "{{ pod_network_cidr | default('10.244.0.0/16') }}"
+    service_network_cidr: "{{ service_network_cidr | default('10.96.0.0/12') }}"
+  
   pre_tasks:
-    - name: Ensure Ansible is running with elevated privileges
+    - name: Validate required variables
       ansible.builtin.assert:
         that:
-          - ansible_user_id == 'root'
-        fail_msg: "This playbook must be run with root privileges."
+          - kubernetes_version is defined
+          - pod_network_cidr is defined
+        fail_msg: "Required variables must be set in inventory"
       
   
   tasks:
     # Update System Packages
     - name: Update system packages (Debian)
-      apt:
-        update_cache: yes
+      ansible.builtin.apt:
+        update_cache: true
         cache_valid_time: 3600
       when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
 
     - name: Install required packages (Debian)
-      apt:
+      ansible.builtin.apt:
         name:
           - apt-transport-https
           - ca-certificates
@@ -32,14 +38,16 @@
           - lsb-release
         state: present
       when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
 
     - name: Update system packages (RedHat)
-      yum:
-        update_cache: yes
+      ansible.builtin.yum:
+        update_cache: true
       when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
 
     - name: Install required packages (RedHat)
-      yum:
+      ansible.builtin.yum:
         name:
           - ca-certificates
           - curl
@@ -49,43 +57,51 @@
           - lvm2
         state: present
       when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
 
     # Disable Swap
     - name: Disable swap
-      command: swapoff -a
+      ansible.builtin.command: swapoff -a
       when: ansible_swaptotal_mb > 0
+      changed_when: false
+      tags: ['system', 'swap']
 
     - name: Remove swap from fstab
-      lineinfile:
+      ansible.builtin.lineinfile:
         path: /etc/fstab
         regexp: '^.*swap.*$'
         state: absent
+      tags: ['system', 'swap']
 
     # Kernel Modules
     - name: Load kernel modules
-      modprobe:
+      community.general.modprobe:
         name: "{{ item }}"
       loop:
         - overlay
         - br_netfilter
+      tags: ['system', 'kernel']
 
     - name: Configure kernel modules to load at boot
-      copy:
+      ansible.builtin.copy:
         content: |
           overlay
           br_netfilter
         dest: /etc/modules-load.d/k8s.conf
+        mode: '0644'
+      tags: ['system', 'kernel']
 
     - name: Set sysctl params for Kubernetes networking
-      sysctl:
+      ansible.posix.sysctl:
         name: "{{ item.name }}"
         value: "{{ item.value }}"
         state: present
-        reload: yes
+        reload: true
       loop:
         - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
         - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
         - { name: 'net.ipv4.ip_forward', value: '1' }
+      tags: ['system', 'kernel']
 
     # Containerd Installation
     - name: Install containerd (Debian)

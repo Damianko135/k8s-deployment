@@ -1,0 +1,346 @@
+---
+# Docker Installation Playbook
+# Supports Ubuntu/Debian, RHEL/CentOS/Fedora, and other major distributions
+
+- name: Install and Configure Docker
+  hosts: all
+  become: true
+  vars:
+    # Docker configuration variables
+    docker_edition: "ce"  # ce (Community Edition) or ee (Enterprise Edition)
+    docker_package: "docker-{{ docker_edition }}"
+    docker_package_state: present
+    docker_service_state: started
+    docker_service_enabled: true
+    docker_restart_handler_state: restarted
+    
+    # Docker Compose
+    docker_compose_version: "2.24.5"
+    docker_compose_install: true
+    
+    # User management
+    docker_users: []  # Add users to docker group, e.g., ['ubuntu', 'admin']
+    
+    # Docker daemon configuration
+    docker_daemon_options:
+      log-driver: "json-file"
+      log-opts:
+        max-size: "100m"
+        max-file: "3"
+      storage-driver: "overlay2"
+
+  pre_tasks:
+    - name: Gather OS facts
+      ansible.builtin.setup:
+        gather_subset:
+          - "!all"
+          - "!min"
+          - distribution
+          - distribution_version
+          - os_family
+      tags: ['always']
+
+    - name: Validate supported OS
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family in ['Debian', 'RedHat', 'Suse']
+        fail_msg: "Unsupported OS family: {{ ansible_os_family }}"
+      tags: ['always']
+
+  tasks:
+    # System preparation
+    - name: Update package cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
+
+    - name: Update package cache (RedHat/CentOS/Fedora)
+      ansible.builtin.yum:
+        update_cache: true
+      when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
+
+    - name: Install required packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - software-properties-common
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: ['system', 'packages']
+
+    - name: Install required packages (RedHat/CentOS/Fedora)
+      ansible.builtin.yum:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+      when: ansible_os_family == "RedHat"
+      tags: ['system', 'packages']
+
+    - name: Install required packages (SUSE)
+      ansible.builtin.zypper:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: ansible_os_family == "Suse"
+      tags: ['system', 'packages']
+
+    # Remove old Docker versions
+    - name: Remove old Docker packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - docker
+          - docker-engine
+          - docker.io
+          - containerd
+          - runc
+        state: absent
+      when: ansible_os_family == "Debian"
+      tags: ['docker', 'cleanup']
+
+    - name: Remove old Docker packages (RedHat/CentOS/Fedora)
+      ansible.builtin.yum:
+        name:
+          - docker
+          - docker-client
+          - docker-client-latest
+          - docker-common
+          - docker-latest
+          - docker-latest-logrotate
+          - docker-logrotate
+          - docker-engine
+        state: absent
+      when: ansible_os_family == "RedHat"
+      tags: ['docker', 'cleanup']
+
+    # Add Docker repository
+    - name: Add Docker GPG key (Debian/Ubuntu)
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: ['docker', 'repository']
+
+    - name: Add Docker repository (Debian/Ubuntu)
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      tags: ['docker', 'repository']
+
+    - name: Add Docker repository (RedHat/CentOS)
+      ansible.builtin.yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable - $basearch
+        baseurl: "https://download.docker.com/linux/centos/{{ ansible_distribution_major_version }}/$basearch/stable"
+        gpgcheck: true
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        enabled: true
+      when: 
+        - ansible_os_family == "RedHat"
+        - ansible_distribution in ['CentOS', 'RedHat', 'Rocky', 'AlmaLinux']
+      tags: ['docker', 'repository']
+
+    - name: Add Docker repository (Fedora)
+      ansible.builtin.yum_repository:
+        name: docker-ce-stable
+        description: Docker CE Stable - $basearch
+        baseurl: "https://download.docker.com/linux/fedora/$releasever/$basearch/stable"
+        gpgcheck: true
+        gpgkey: https://download.docker.com/linux/fedora/gpg
+        enabled: true
+      when: 
+        - ansible_os_family == "RedHat"
+        - ansible_distribution == "Fedora"
+      tags: ['docker', 'repository']
+
+    - name: Add Docker repository (SUSE)
+      ansible.builtin.zypper_repository:
+        name: docker-ce-stable
+        repo: "https://download.docker.com/linux/sles/{{ ansible_distribution_major_version }}/x86_64/stable/"
+        state: present
+        auto_import_keys: true
+      when: ansible_os_family == "Suse"
+      tags: ['docker', 'repository']
+
+    # Install Docker
+    - name: Install Docker CE (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: "{{ docker_package_state }}"
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      notify: restart docker
+      tags: ['docker', 'install']
+
+    - name: Install Docker CE (RedHat/CentOS/Fedora)
+      ansible.builtin.yum:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: "{{ docker_package_state }}"
+      when: ansible_os_family == "RedHat"
+      notify: restart docker
+      tags: ['docker', 'install']
+
+    - name: Install Docker CE (SUSE)
+      ansible.builtin.zypper:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: "{{ docker_package_state }}"
+      when: ansible_os_family == "Suse"
+      notify: restart docker
+      tags: ['docker', 'install']
+
+    # Configure Docker daemon
+    - name: Create Docker daemon configuration directory
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: '0755'
+      tags: ['docker', 'config']
+
+    - name: Configure Docker daemon
+      ansible.builtin.copy:
+        content: "{{ docker_daemon_options | to_nice_json }}"
+        dest: /etc/docker/daemon.json
+        mode: '0644'
+      notify: restart docker
+      tags: ['docker', 'config']
+
+    # Start and enable Docker service
+    - name: Start and enable Docker service
+      ansible.builtin.systemd:
+        name: docker
+        state: "{{ docker_service_state }}"
+        enabled: "{{ docker_service_enabled }}"
+        daemon_reload: true
+      tags: ['docker', 'service']
+
+    # User management
+    - name: Add users to docker group
+      ansible.builtin.user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop: "{{ docker_users }}"
+      when: docker_users | length > 0
+      tags: ['docker', 'users']
+
+    # Install Docker Compose (standalone)
+    - name: Check if Docker Compose is installed
+      ansible.builtin.command: docker-compose --version
+      register: docker_compose_check
+      failed_when: false
+      changed_when: false
+      when: docker_compose_install
+      tags: ['docker-compose']
+
+    - name: Download Docker Compose
+      ansible.builtin.get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-{{ ansible_system }}-{{ ansible_architecture }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      when: 
+        - docker_compose_install
+        - docker_compose_check.rc != 0
+      tags: ['docker-compose']
+
+    # Verification
+    - name: Verify Docker installation
+      ansible.builtin.command: docker --version
+      register: docker_version
+      changed_when: false
+      tags: ['docker', 'verify']
+
+    - name: Display Docker version
+      ansible.builtin.debug:
+        msg: "{{ docker_version.stdout }}"
+      tags: ['docker', 'verify']
+
+    - name: Verify Docker service is running
+      ansible.builtin.service_facts:
+      tags: ['docker', 'verify']
+
+    - name: Check Docker service status
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['docker.service'].state == 'running'
+        success_msg: "Docker service is running"
+        fail_msg: "Docker service is not running"
+      tags: ['docker', 'verify']
+
+    # Test Docker functionality
+    - name: Test Docker with hello-world container
+      ansible.builtin.command: docker run --rm hello-world
+      register: docker_test
+      changed_when: false
+      tags: ['docker', 'test']
+
+    - name: Display Docker test result
+      ansible.builtin.debug:
+        msg: "Docker test successful"
+      when: docker_test.rc == 0
+      tags: ['docker', 'test']
+
+  handlers:
+    - name: restart docker
+      ansible.builtin.systemd:
+        name: docker
+        state: "{{ docker_restart_handler_state }}"
+        daemon_reload: true
+
+# Post-installation tasks
+- name: Docker Post-Installation Configuration
+  hosts: all
+  become: true
+  tasks:
+    - name: Configure Docker to start on boot
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+      tags: ['docker', 'post-install']
+
+    - name: Create Docker network for applications (optional)
+      community.docker.docker_network:
+        name: app-network
+        driver: bridge
+        ipam_config:
+          - subnet: "172.20.0.0/16"
+            gateway: "172.20.0.1"
+      tags: ['docker', 'network']
+      ignore_errors: true  # In case docker collection is not installed
+
+    - name: Display post-installation information
+      ansible.builtin.debug:
+        msg:
+          - "Docker installation completed successfully!"
+          - "Users added to docker group: {{ docker_users | default(['none']) }}"
+          - "Docker Compose installed: {{ docker_compose_install }}"
+          - "Remember to log out and back in for group changes to take effect"
+      tags: ['docker', 'info']

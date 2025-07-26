@@ -1,26 +1,27 @@
 ---
-# Ansible Collections and Roles for K3s/Kubernetes Deployment
+# Ansible Collections for K3s/Kubernetes Deployment
+# Install with: ansible-galaxy collection install -r requirements.yml
 
-# Collections (install with: ansible-galaxy collection install -r requirements.yml)
 collections:
   # Kubernetes core modules for cluster management
   - name: kubernetes.core
-    version: ">=2.4.0"
+    version: ">=3.0.0"
   
-  # Community general utilities
+  # Community general utilities and modules
   - name: community.general
-    version: ">=7.0.0"
+    version: ">=8.0.0"
+  
+  # POSIX utilities for system management
+  - name: ansible.posix
+    version: ">=1.5.0"
+  
+  # Built-in modules (explicitly specify for clarity)
+  - name: ansible.builtin
+    version: ">=2.16.0"
+  
+  # Docker collection for container management
+  - name: community.docker
+    version: ">=3.4.0"
 
-# Roles (if you want to use external roles instead of your custom playbooks)
-# Install with: ansible-galaxy role install -r requirements.yml
-# roles:
-#   # System configuration roles 
-#   - src: geerlingguy.firewall
-#     version: 2.4.3
-
-
-#   - name: geerlingguy.ntp
-#     version: 2.7.0
-
-# Note: K3s installation is handled by your custom playbook using the official install script
-# No need for kubernetes, docker, or calico roles since K3s bundles everything
+# Note: This minimal setup uses custom playbooks instead of external roles
+# for better control and reduced dependencies

@@ -63,9 +63,13 @@ ansible-playbook -i hosts.ini k3s-deploy.yml
 # OR deploy traditional Kubernetes
 ansible-playbook -i hosts.ini k8s-install.yml
 
+# OR install Docker on specified hosts
+ansible-playbook -i hosts.ini docker-install.yml
+
 # Target specific groups
 ansible-playbook -i hosts.ini k3s-deploy.yml --limit k3s_masters
 ansible-playbook -i hosts.ini k3s-deploy.yml --limit k3s_workers
+ansible-playbook -i hosts.ini docker-install.yml --limit docker_hosts
 ```
 
 ## 📋 Requirements
@@ -85,7 +89,7 @@ ansible-playbook -i hosts.ini k3s-deploy.yml --limit k3s_workers
 
 ### K3s (Recommended)
 - **Lightweight**: Minimal resource usage
-- **Latest Version**: K3s v1.33.2+k3s1 (Kubernetes v1.33.2)
+- **Latest Version**: K3s v1.29.1+k3s2 (Kubernetes v1.29)
 - **CNI Options**: Calico (default) or Flannel
 - **Features**: Built-in HA, embedded etcd, automatic TLS
 
@@ -93,6 +97,12 @@ ansible-playbook -i hosts.ini k3s-deploy.yml --limit k3s_workers
 - **Full-featured**: Complete Kubernetes distribution
 - **Customizable**: Full control over components
 - **Production-grade**: Enterprise-ready setup
+
+### Docker Installation
+- **Multi-OS Support**: Ubuntu/Debian, RHEL/CentOS/Fedora, SUSE
+- **Latest Docker CE**: Community Edition with latest features
+- **Docker Compose**: Optional Docker Compose installation
+- **User Management**: Automatic user group configuration
 
 ## 🔧 Configuration
 
@@ -115,21 +125,31 @@ vars:
 Edit variables in `k8s-install.yml`:
 ```yaml
 vars:
-  kubernetes_version: "1.33"
+  kubernetes_version: "1.29"
   pod_network_cidr: "10.244.0.0/16"
+```
+
+### Docker Customization
+Edit variables in `hosts.ini` under `[docker_hosts:vars]`:
+```ini
+docker_compose_install=true
+docker_compose_version=2.24.5
+docker_users=['ubuntu', 'admin']
 ```
 
 ## 📁 File Structure
 
 ```
-├── install.sh              # Environment setup script (simplified)
+├── install.sh              # Environment setup script
 ├── k3s-deploy.yml          # K3s installation playbook (recommended)
 ├── k8s-install.yml         # Traditional Kubernetes playbook
+├── docker-install.yml      # Docker installation playbook
 ├── hosts.ini               # Inventory file for target hosts
 ├── ansible.cfg             # Ansible configuration
 ├── requirements.txt        # Python dependencies
 ├── requirements.yml        # Ansible Galaxy requirements
-└── README.md              # This file
+├── Makefile               # Development shortcuts
+└── README.md              # This documentation
 ```
 
 ## 🌟 Features
@@ -141,6 +161,14 @@ vars:
 - ✅ **Security**: Network policies with Calico, automatic TLS
 - ✅ **Lightweight**: Optimized for edge and IoT deployments
 - ✅ **Production Ready**: Used in production environments
+
+### Docker Installation
+- ✅ **Multi-OS Support**: Ubuntu/Debian, RHEL/CentOS/Fedora, SUSE
+- ✅ **Latest Docker CE**: Automatic installation of Docker Community Edition
+- ✅ **Docker Compose**: Optional Docker Compose v2 installation
+- ✅ **User Management**: Automatic docker group configuration
+- ✅ **Service Management**: Automatic service startup and enablement
+- ✅ **Verification**: Built-in installation and functionality testing
 
 ### Enhanced Install Script
 - ✅ **Multi-OS Support**: Auto-detection of package managers
@@ -164,9 +192,14 @@ ansible all -i hosts.ini -m ping
 # Check Ansible syntax
 ansible-playbook --syntax-check k3s-deploy.yml
 ansible-playbook --syntax-check k8s-install.yml
+ansible-playbook --syntax-check docker-install.yml
 
 # Validate K3s deployment
 kubectl get nodes --kubeconfig ./k3s-kubeconfig
+
+# Validate Docker installation
+ansible docker_hosts -i hosts.ini -m command -a "docker --version"
+ansible docker_hosts -i hosts.ini -m command -a "docker-compose --version"
 ```
 
 ## 🐛 Troubleshooting
@@ -216,11 +249,30 @@ kubectl get nodes --kubeconfig ./k3s-kubeconfig
    k3s kubectl logs -n calico-system -l k8s-app=calico-node
    ```
 
+7. **Docker Specific Issues**
+   ```bash
+   # Check Docker status
+   sudo systemctl status docker
+   
+   # View Docker logs
+   sudo journalctl -u docker -f
+   
+   # Test Docker functionality
+   docker run --rm hello-world
+   
+   # Check Docker Compose
+   docker-compose --version
+   
+   # Verify user in docker group
+   groups $USER
+   ```
+
 ### Debugging
 
 Enable verbose output:
 ```bash
 ansible-playbook -i hosts.ini k3s-deploy.yml -vvv
+ansible-playbook -i hosts.ini docker-install.yml -vvv
 ```
 
 ### Getting K3s Kubeconfig
