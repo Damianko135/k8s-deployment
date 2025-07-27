@@ -45,16 +45,16 @@ install_system_packages() {
     case "$os_family" in
         *debian*|*ubuntu*)
             print_status "Using apt for package installation..."
-            sudo apt update
-            sudo apt install -y python3 python3-pip python3-venv git curl wget
+            sudo apt update > /dev/null
+            sudo apt install -y python3 python3-pip python3-venv git curl wget > /dev/null
             ;;
         *rhel*|*centos*|*fedora*)
             print_status "Using dnf/yum for package installation..."
             local pkg_manager="dnf"
             command -v dnf &> /dev/null || pkg_manager="yum"
             
-            sudo $pkg_manager install -y python3 python3-pip git curl wget
-            sudo $pkg_manager install -y python3-venv 2>/dev/null || \
+            sudo $pkg_manager install -y python3 python3-pip git curl wget > /dev/null
+            sudo $pkg_manager install -y python3-venv > /dev/null || \
                 print_warning "python3-venv not available, will install virtualenv via pip."
             ;;
         *)
@@ -78,13 +78,13 @@ setup_venv() {
 
     print_status "Creating new virtual environment..."
     if python3 -m venv --help &> /dev/null; then
-        python3 -m venv "$venv_dir"
+        python3 -m venv "$venv_dir" > /dev/null
     elif command -v virtualenv &> /dev/null; then
-        virtualenv -p python3 "$venv_dir"
+        virtualenv -p python3 "$venv_dir" > /dev/null
     else
         print_status "Installing virtualenv via pip..."
-        python3 -m pip install --user virtualenv
-        python3 -m virtualenv "$venv_dir"
+        python3 -m pip install --user virtualenv > /dev/null
+        python3 -m virtualenv "$venv_dir" > /dev/null
     fi
 
     print_status "Activating virtual environment..."
@@ -92,7 +92,7 @@ setup_venv() {
     source "$venv_dir/bin/activate"
 
     print_status "Upgrading pip..."
-    pip install --upgrade pip
+    pip install --upgrade pip > /dev/null
 }
 
 install_python_packages() {
@@ -100,10 +100,11 @@ install_python_packages() {
 
     if [ -f "requirements.txt" ]; then
         print_status "Installing from requirements.txt..."
-        pip install -r requirements.txt
+        print_status "This will take a while, please be patient."
+        pip install -r requirements.txt > /dev/null # Suppress output for cleaner logs
     else
         print_status "Installing Ansible and dependencies..."
-        pip install "ansible>=9.0.0" netaddr jmespath kubernetes cryptography
+        pip install "ansible>=9.0.0" netaddr jmespath kubernetes cryptography > /dev/null
     fi
 
     print_status "Verifying Ansible installation..."
@@ -160,7 +161,7 @@ main() {
             print_status "Setting up system-wide installation..."
             cmd="pip3 install --user"
             [ "$(id -u)" -eq 0 ] && cmd="pip install"
-            $cmd "ansible>=9.0.0" netaddr jmespath kubernetes cryptography
+            $cmd "ansible>=9.0.0" netaddr jmespath kubernetes cryptography > /dev/null
             hash -r  # Refresh shell's command lookup
             print_warning "Ensure ~/.local/bin is in your PATH if using --user installs."
             verify_installation
