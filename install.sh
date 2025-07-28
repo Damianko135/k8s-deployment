@@ -134,7 +134,7 @@ show_usage() {
 }
 
 main() {
-    print_header "Kubernetes Deployment Environment Setup"
+    print_header "Container Deployment Environment Setup"
 
     os_family=$(detect_os_family)
     print_status "Detected OS family: $os_family"
